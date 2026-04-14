@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tab Time Limiter</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+
+  <!-- Header -->
+  <header class="header">
+    <div class="header-left">
+      <svg class="header-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10"/>
+        <polyline points="12 6 12 12 16 14"/>
+      </svg>
+      <span class="header-title">Tab Time Limiter</span>
+    </div>
+    <button class="icon-btn" id="btnAddToggle" title="添加网站">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <line x1="12" y1="5" x2="12" y2="19"/>
+        <line x1="5" y1="12" x2="19" y2="12"/>
+      </svg>
+    </button>
+  </header>
+
+  <!-- Add / Edit Form -->
+  <div class="form-panel" id="formPanel" hidden>
+    <h2 class="form-title" id="formTitle">添加网站限制</h2>
+    <input type="hidden" id="editId" />
+
+    <div class="field">
+      <label class="label" for="inputHostname">网站域名</label>
+      <input
+        class="input"
+        id="inputHostname"
+        type="text"
+        placeholder="例如：youtube.com"
+        autocomplete="off"
+        spellcheck="false"
+      />
+    </div>
+
+    <div class="field-row">
+      <div class="field flex-1">
+        <label class="label" for="inputLimit">时间限额 (分钟)</label>
+        <input class="input" id="inputLimit" type="number" min="1" max="1440" placeholder="60" />
+      </div>
+      <div class="field flex-1">
+        <label class="label" for="inputWindow">计时窗口 (小时)</label>
+        <input class="input" id="inputWindow" type="number" min="1" max="168" placeholder="24" />
+      </div>
+    </div>
+
+    <!-- Quick presets -->
+    <div class="presets">
+      <span class="presets-label">快速预设：</span>
+      <button class="preset-btn" data-min="30" data-hrs="24">30分/天</button>
+      <button class="preset-btn" data-min="60" data-hrs="24">1小时/天</button>
+      <button class="preset-btn" data-min="120" data-hrs="24">2小时/天</button>
+      <button class="preset-btn" data-min="30" data-hrs="4">30分/4小时</button>
+    </div>
+
+    <div class="form-actions">
+      <button class="btn btn-ghost" id="btnCancel">取消</button>
+      <button class="btn btn-primary" id="btnSave">保存</button>
+    </div>
+
+    <p class="form-hint" id="formError" hidden></p>
+  </div>
+
+  <!-- Sites list -->
+  <main class="site-list" id="siteList">
+    <!-- Populated by popup.js -->
+  </main>
+
+  <!-- Empty state -->
+  <div class="empty-state" id="emptyState" hidden>
+    <svg viewBox="0 0 64 64" fill="none">
+      <circle cx="32" cy="32" r="30" stroke="#c7d2fe" stroke-width="2"/>
+      <path d="M32 18v14l8 5" stroke="#818cf8" stroke-width="2.5" stroke-linecap="round"/>
+    </svg>
+    <p class="empty-title">暂无监控网站</p>
+    <p class="empty-sub">点击右上角 <strong>+</strong> 添加需要限制的网站</p>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
