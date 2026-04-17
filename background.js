@@ -19,6 +19,8 @@ const GRACE_MS = 2 * 60 * 1000;  // grace period before closing a blocked tab
 
 // tabId → timestamp when it should be closed
 const pendingClose = new Map();
+let pendingCloseLoaded = false;
+let pendingCloseLoadPromise = null;
 
 // Currently tracked session (also persisted to storage to survive SW restarts)
 // Shape: { tabId: number, siteId: string, startTime: number } | null
@@ -30,12 +32,15 @@ chrome.runtime.onInstalled.addListener(onInit);
 chrome.runtime.onStartup.addListener(onInit);
 
 async function onInit() {
-  const data = await chrome.storage.local.get(['sites', 'usage']);
+  const data = await chrome.storage.local.get(['sites', 'usage', 'pendingClose']);
   if (!data.sites) {
-    await chrome.storage.local.set({ sites: [], usage: {}, activeSession: null });
+    await chrome.storage.local.set({ sites: [], usage: {}, activeSession: null, pendingClose: {} });
+  } else if (!data.pendingClose) {
+    await chrome.storage.local.set({ pendingClose: {} });
   }
   await chrome.alarms.clear(ALARM_NAME);
   chrome.alarms.create(ALARM_NAME, { periodInMinutes: ALARM_PERIOD_MINUTES });
+  await ensurePendingCloseLoaded();
   await recoverAndStartSession();
   console.log('[TTL] Initialized');
 }
@@ -71,7 +76,7 @@ chrome.windows.onFocusChanged.addListener(async (windowId) => {
 // Tab closed
 chrome.tabs.onRemoved.addListener(async (tabId) => {
   if (activeSession?.tabId === tabId) await endSession();
-  pendingClose.delete(tabId);
+  await removePendingClose(tabId);
 });
 
 // ─── Alarm ────────────────────────────────────────────────────────────────────
@@ -93,6 +98,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
  * If the site is already over-limit, schedule the tab for closure instead.
  */
 async function tryStartSession(tabId, url) {
+  await ensurePendingCloseLoaded();
   const { sites = [], usage = {} } = await chrome.storage.local.get(['sites', 'usage']);
   const site = matchSite(sites, url);
   if (!site) return;
@@ -108,7 +114,7 @@ async function tryStartSession(tabId, url) {
 
   // Already over limit → schedule close, do not track
   if (isOverLimit(usage[site.id], site)) {
-    schedulePendingClose(tabId, site);
+    await schedulePendingClose(tabId, site);
     return;
   }
 
@@ -153,6 +159,7 @@ async function endSession() {
  * then starts a fresh session from the current active tab.
  */
 async function recoverAndStartSession() {
+  await ensurePendingCloseLoaded();
   const { activeSession: saved, sites = [], usage = {} } =
     await chrome.storage.local.get(['activeSession', 'sites', 'usage']);
 
@@ -187,23 +194,27 @@ async function recoverAndStartSession() {
  * Register a tab for closure after GRACE_MS.
  * If the tab is already registered the original countdown is preserved.
  */
-function schedulePendingClose(tabId, site) {
+async function schedulePendingClose(tabId, site) {
+  await ensurePendingCloseLoaded();
   if (pendingClose.has(tabId)) return;
   pendingClose.set(tabId, Date.now() + GRACE_MS);
+  await persistPendingCloseMap();
   fireWarningNotification(site);
 }
 
 /** Schedule all open tabs of a site id for deferred closure. */
 async function scheduleAllTabsForSite(sites, siteId, site) {
+  await ensurePendingCloseLoaded();
   const allTabs = await chrome.tabs.query({});
   for (const tab of allTabs) {
     if (!tab.url) continue;
-    if (matchSite(sites, tab.url)?.id === siteId) schedulePendingClose(tab.id, site);
+    if (matchSite(sites, tab.url)?.id === siteId) await schedulePendingClose(tab.id, site);
   }
 }
 
 /** Close every tab whose grace period has elapsed. */
 async function processPendingCloses() {
+  await ensurePendingCloseLoaded();
   const now = Date.now();
   for (const [tabId, closeAt] of pendingClose.entries()) {
     if (now >= closeAt) {
@@ -211,6 +222,7 @@ async function processPendingCloses() {
       pendingClose.delete(tabId);
     }
   }
+  await persistPendingCloseMap();
 }
 
 /**
@@ -218,6 +230,7 @@ async function processPendingCloses() {
  * Lightweight – does not add time, only triggers close scheduling.
  */
 async function enforceAllOpenTabs() {
+  await ensurePendingCloseLoaded();
   const { sites = [], usage = {} } = await chrome.storage.local.get(['sites', 'usage']);
   if (!sites.length) return;
   const now = Date.now();
@@ -229,7 +242,7 @@ async function enforceAllOpenTabs() {
     const su = usage[site.id];
     if (!su) continue;
     if (now > su.windowStart + site.windowHours * 3600 * 1000) continue; // window expired
-    if (isOverLimit(su, site)) schedulePendingClose(tab.id, site);
+    if (isOverLimit(su, site)) await schedulePendingClose(tab.id, site);
   }
 }
 
@@ -283,4 +296,37 @@ function fireWarningNotification(site) {
     message: `${site.hostname} 的${windowDesc}使用时间（${site.limitMinutes} 分钟）已用完，标签页将在 2 分钟后关闭。`,
     priority: 2,
   });
+}
+
+// ─── Pending-close persistence ───────────────────────────────────────────────
+
+async function ensurePendingCloseLoaded() {
+  if (pendingCloseLoaded) return;
+  if (!pendingCloseLoadPromise) {
+    pendingCloseLoadPromise = (async () => {
+      const { pendingClose: saved = {} } = await chrome.storage.local.get('pendingClose');
+      pendingClose.clear();
+      for (const [tabId, closeAt] of Object.entries(saved)) {
+        const parsedTabId = Number(tabId);
+        const parsedCloseAt = Number(closeAt);
+        if (!Number.isFinite(parsedTabId) || !Number.isFinite(parsedCloseAt)) continue;
+        pendingClose.set(parsedTabId, parsedCloseAt);
+      }
+      pendingCloseLoaded = true;
+    })().finally(() => {
+      pendingCloseLoadPromise = null;
+    });
+  }
+  await pendingCloseLoadPromise;
+}
+
+async function persistPendingCloseMap() {
+  const serialized = Object.fromEntries(pendingClose.entries());
+  await chrome.storage.local.set({ pendingClose: serialized });
+}
+
+async function removePendingClose(tabId) {
+  await ensurePendingCloseLoaded();
+  if (!pendingClose.delete(tabId)) return;
+  await persistPendingCloseMap();
 }

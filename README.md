@@ -10,7 +10,7 @@
 - **2 分钟宽限期**：超出配额后先推送桌面通知，2 分钟后再关闭相关标签页
 - **快速预设**：内置 30 分/天、1 小时/天、2 小时/天、30 分/4 小时等常用规则，一键填入
 - **事件驱动计时**：切换标签、切换窗口、页面跳转时精确开始/结束计时，不依赖轮询，误差极小
-- **Service Worker 崩溃恢复**：Chrome 杀死后台 Service Worker 后，下次唤醒时自动补算遗漏时间
+- **Service Worker 崩溃恢复**：Chrome 杀死后台 Service Worker 后，下次唤醒时自动补算遗漏时间，并恢复待关闭标签页的倒计时
 
 ## 安装
 
@@ -71,7 +71,7 @@ tab-time-limit-closer/
 
 ## 技术实现
 
-- **Manifest V3 Service Worker**：后台逻辑运行在 Service Worker 中，Chrome 可能随时将其挂起。扩展通过将活跃会话持久化到 `chrome.storage.local` 来应对这一情况，重启后自动补算遗漏时长。
+- **Manifest V3 Service Worker**：后台逻辑运行在 Service Worker 中，Chrome 可能随时将其挂起。扩展通过将活跃会话和待关闭队列持久化到 `chrome.storage.local` 来应对这一情况，重启后自动补算遗漏时长并继续执行宽限期后的关页动作。
 - **事件驱动计时**：`tabs.onActivated`、`tabs.onUpdated`、`windows.onFocusChanged`、`tabs.onRemoved` 四个事件联动，精确记录每次会话的起止时间。
 - **URL 匹配**：通过 hostname 前缀匹配，`youtube.com` 可同时覆盖 `www.youtube.com`、`m.youtube.com` 等所有子域名。
 - **窗口重置**：计时窗口基于首次访问时间滚动计算，窗口到期后配额自动归零。
